@@ -7,6 +7,7 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CACHE_FILE = path.join(__dirname, 'data', 'cache.json');
+const GEOCODE_CACHE_FILE = path.join(__dirname, 'data', 'geocode_cache.json');
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -126,8 +127,17 @@ function parseCard($, el, label, color) {
   };
 }
 
+// Strip inline <style> and <script> blocks — Elementor injects them into the
+// HTML itself, making each page ~880KB. Removing them cuts cheerio parse time
+// and memory usage without affecting the listing markup we actually need.
+function stripInlineAssets(html) {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+}
+
 function parsePageListings(html, label, color) {
-  const $ = cheerio.load(html);
+  const $ = cheerio.load(stripInlineAssets(html));
   const listings = [];
   $('[data-elementor-type="loop-item"].accommodation-listin').each((_, el) => {
     const listing = parseCard($, el, label, color);
@@ -153,6 +163,33 @@ async function fetchWithRetry(url, retries = 3) {
   }
 }
 
+// Geocode cache — persists Eircode→coords across 2-hour refreshes so we only
+// call Google Maps for listings that are genuinely new.
+function readGeocodeCache() {
+  try {
+    return JSON.parse(fs.readFileSync(GEOCODE_CACHE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function saveGeocodeCache(cache) {
+  fs.mkdirSync(path.dirname(GEOCODE_CACHE_FILE), { recursive: true });
+  fs.writeFileSync(GEOCODE_CACHE_FILE, JSON.stringify(cache));
+}
+
+// Run fn over items with at most `limit` concurrent promises.
+async function withConcurrency(items, fn, limit) {
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 async function scrapeAll() {
   const all = [];
 
@@ -166,7 +203,7 @@ async function scrapeAll() {
     console.log(`  pages: ${lastPage}, page 1: ${page1.length} listings`);
 
     for (let p = 2; p <= lastPage; p++) {
-      await sleep(1000);
+      await sleep(300);
       try {
         const html = await fetchWithRetry(buildUrl(src.tag, p));
         const { listings } = parsePageListings(html, src.label, src.color);
@@ -178,8 +215,6 @@ async function scrapeAll() {
     }
   }
 
-  console.log(`\n[geocode] ${all.length} listings total`);
-
   // Deduplicate by URL (a listing may appear under both tags)
   const seen = new Set();
   const unique = all.filter(l => {
@@ -187,23 +222,44 @@ async function scrapeAll() {
     seen.add(l.url);
     return true;
   });
+  console.log(`\n[geocode] ${unique.length} unique listings (${all.length - unique.length} duplicates removed)`);
 
-  console.log(`  unique: ${unique.length} (removed ${all.length - unique.length} duplicates)`);
+  // Check geocoding cache first
+  const geoCache = readGeocodeCache();
+  const toGeocode = [];
+  let cacheHits = 0;
 
-  for (let i = 0; i < unique.length; i++) {
-    const listing = unique[i];
-    await sleep(100); // ~10 req/s to Google Maps
+  for (const listing of unique) {
+    const key = listing.eircode || listing.title;
+    if (geoCache[key]) {
+      listing.lat = geoCache[key].lat;
+      listing.lng = geoCache[key].lng;
+      listing.geocodeMethod = 'cache';
+      cacheHits++;
+    } else {
+      toGeocode.push(listing);
+    }
+  }
+  console.log(`  cache hits: ${cacheHits}, need geocoding: ${toGeocode.length}`);
+
+  // Geocode remaining listings 10 at a time
+  let done = 0;
+  await withConcurrency(toGeocode, async (listing) => {
     const coords = await geocode(listing.eircode, listing.title);
     if (coords) {
       listing.lat = coords.lat;
       listing.lng = coords.lng;
       listing.geocodeMethod = coords.method;
+      geoCache[listing.eircode || listing.title] = { lat: coords.lat, lng: coords.lng };
     }
-    if ((i + 1) % 25 === 0 || i + 1 === unique.length) {
-      const done = unique.filter(l => l.lat !== null).length;
-      console.log(`  geocoded ${i + 1}/${unique.length} (${done} successful)`);
+    done++;
+    if (done % 25 === 0 || done === toGeocode.length) {
+      console.log(`  geocoded ${done}/${toGeocode.length}`);
     }
-  }
+  }, 10);
+
+  saveGeocodeCache(geoCache);
+  console.log(`  total mapped: ${unique.filter(l => l.lat !== null).length}/${unique.length}`);
 
   return unique;
 }
