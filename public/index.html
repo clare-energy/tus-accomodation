@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TUS Moylish Accommodation Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      background: #f1f5f9;
+    }
+
+    /* ── Header ── */
+    #header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: #1e3a5f;
+      color: #fff;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    #header h1 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      white-space: nowrap;
+    }
+    #header .tus-logo {
+      font-size: 1.4rem;
+      line-height: 1;
+    }
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: #93c5fd;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    #last-updated { color: #93c5fd; }
+    #stale-badge {
+      background: #f59e0b;
+      color: #1c1917;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+      display: none;
+    }
+    #refreshing-badge {
+      background: #3b82f6;
+      color: #fff;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+      display: none;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+    button#refresh-btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 5px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    button#refresh-btn:hover { background: #1d4ed8; }
+    button#refresh-btn:disabled { background: #64748b; cursor: not-allowed; }
+
+    /* ── Filter bar ── */
+    #filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    #filter-bar label {
+      font-size: 0.8rem;
+      color: #475569;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    #filter-bar input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
+    .dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .sep { width: 1px; height: 20px; background: #e2e8f0; }
+
+    #filter-bar .range-group {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.8rem; color: #475569;
+    }
+    #filter-bar input[type="range"] { width: 110px; }
+    #count-label {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    /* ── Map ── */
+    #map { flex: 1; z-index: 0; }
+
+    /* ── Loading overlay ── */
+    #loading {
+      position: fixed; inset: 0;
+      background: rgba(15, 23, 42, 0.8);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 9999;
+      gap: 16px;
+      color: #fff;
+    }
+    #loading.hidden { display: none; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { font-size: 0.95rem; color: #94a3b8; margin-top: 4px; }
+
+    /* ── Popup ── */
+    .popup-card { min-width: 220px; max-width: 280px; }
+    .popup-card h3 {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 8px;
+      line-height: 1.3;
+    }
+    .popup-row {
+      display: flex; justify-content: space-between;
+      font-size: 0.8rem; color: #475569;
+      padding: 3px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .popup-row:last-of-type { border-bottom: none; }
+    .popup-row strong { color: #1e293b; }
+    .popup-type {
+      display: inline-block;
+      margin: 6px 0;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    .popup-link {
+      display: block;
+      margin-top: 10px;
+      text-align: center;
+      background: #1e3a5f;
+      color: #fff;
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .popup-link:hover { background: #2563eb; }
+    .no-coords {
+      font-size: 0.75rem; color: #94a3b8;
+      font-style: italic; margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <strong>Loading accommodation data…</strong>
+  <p>First load fetches &amp; geocodes all listings — this can take a few minutes.</p>
+</div>
+
+<div id="header">
+  <span class="tus-logo">🏫</span>
+  <h1>TUS Moylish Accommodation Map</h1>
+  <div id="status-bar">
+    <span id="stale-badge">Data outdated</span>
+    <span id="refreshing-badge">⟳ Refreshing…</span>
+    <span id="last-updated"></span>
+    <button id="refresh-btn" onclick="forceRefresh()">Refresh now</button>
+  </div>
+</div>
+
+<div id="filter-bar">
+  <label>
+    <input type="checkbox" id="chk-digs" checked onchange="applyFilters()">
+    <span class="dot" style="background:#2563eb"></span>
+    Digs 5 Days
+  </label>
+  <label>
+    <input type="checkbox" id="chk-room" checked onchange="applyFilters()">
+    <span class="dot" style="background:#16a34a"></span>
+    Room in Owner Occupied House
+  </label>
+  <div class="sep"></div>
+  <div class="range-group">
+    Max weekly:
+    <input type="range" id="max-weekly" min="50" max="400" value="400" step="10" oninput="updateWeeklyLabel(); applyFilters()">
+    <span id="weekly-label">€400</span>
+  </div>
+  <div class="range-group">
+    Min beds:
+    <input type="range" id="min-beds" min="1" max="6" value="1" step="1" oninput="updateBedsLabel(); applyFilters()">
+    <span id="beds-label">1+</span>
+  </div>
+  <span id="count-label">— listings</span>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+  const TUS_MOYLISH = [52.6741, -8.5999]; // TUS Moylish campus
+
+  const map = L.map('map', { preferCanvas: true }).setView(TUS_MOYLISH, 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // TUS campus marker
+  L.marker(TUS_MOYLISH, {
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="background:#dc2626;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    })
+  }).addTo(map).bindTooltip('TUS Moylish Campus', { permanent: false });
+
+  const clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
+  map.addLayer(clusterGroup);
+
+  let allListings = [];
+  let allMarkers = []; // { marker, listing }
+
+  function fmt(val, prefix = '€') {
+    if (val == null) return '—';
+    return prefix + Number(val).toLocaleString('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function makePopup(l) {
+    const deposit = l.weeklyDeposit ? ` <span style="color:#94a3b8;font-size:0.75rem">(dep ${fmt(l.weeklyDeposit)})</span>` : '';
+    const mDeposit = l.monthlyDeposit ? ` <span style="color:#94a3b8;font-size:0.75rem">(dep ${fmt(l.monthlyDeposit)})</span>` : '';
+    return `
+      <div class="popup-card">
+        <h3>${l.title}</h3>
+        <span class="popup-type" style="background:${l.color}">${l.type}</span>
+        <div class="popup-row"><span>Weekly</span><strong>${fmt(l.weekly)}${deposit}</strong></div>
+        <div class="popup-row"><span>Monthly</span><strong>${fmt(l.monthly)}${mDeposit}</strong></div>
+        ${l.beds != null ? `<div class="popup-row"><span>Beds</span><strong>${l.beds}</strong></div>` : ''}
+        ${l.eircode ? `<div class="popup-row"><span>Eircode</span><strong>${l.eircode}</strong></div>` : ''}
+        ${l.url ? `<a class="popup-link" href="${l.url}" target="_blank" rel="noopener">View full listing ↗</a>` : ''}
+      </div>`;
+  }
+
+  function buildMarkers(listings) {
+    clusterGroup.clearLayers();
+    allMarkers = [];
+
+    listings.forEach(l => {
+      if (l.lat == null || l.lng == null) return;
+      const marker = L.circleMarker([l.lat, l.lng], {
+        radius: 8,
+        color: '#fff',
+        weight: 2,
+        fillColor: l.color,
+        fillOpacity: 0.85,
+      }).bindPopup(makePopup(l), { maxWidth: 300 });
+      allMarkers.push({ marker, listing: l });
+      clusterGroup.addLayer(marker);
+    });
+  }
+
+  function applyFilters() {
+    const showDigs = document.getElementById('chk-digs').checked;
+    const showRoom = document.getElementById('chk-room').checked;
+    const maxWeekly = parseInt(document.getElementById('max-weekly').value, 10);
+    const minBeds = parseInt(document.getElementById('min-beds').value, 10);
+
+    clusterGroup.clearLayers();
+    let visible = 0;
+
+    allMarkers.forEach(({ marker, listing: l }) => {
+      const typeOk = (l.type === 'Digs 5 Days' && showDigs) ||
+                     (l.type === 'Room in Owner Occupied House' && showRoom);
+      const priceOk = l.weekly == null || l.weekly <= maxWeekly;
+      const bedsOk  = l.beds == null || l.beds >= minBeds;
+
+      if (typeOk && priceOk && bedsOk) {
+        clusterGroup.addLayer(marker);
+        visible++;
+      }
+    });
+
+    const total = allListings.length;
+    const noCoords = allListings.filter(l => l.lat == null).length;
+    document.getElementById('count-label').textContent =
+      `${visible} shown · ${total - noCoords} mapped · ${noCoords} without coords`;
+  }
+
+  function updateWeeklyLabel() {
+    const v = document.getElementById('max-weekly').value;
+    document.getElementById('weekly-label').textContent = v >= 400 ? '€400+' : `€${v}`;
+  }
+
+  function updateBedsLabel() {
+    const v = document.getElementById('min-beds').value;
+    document.getElementById('beds-label').textContent = `${v}+`;
+  }
+
+  function setRefreshingUI(refreshing) {
+    document.getElementById('refreshing-badge').style.display = refreshing ? 'inline-block' : 'none';
+    document.getElementById('refresh-btn').disabled = refreshing;
+  }
+
+  function renderListings(data) {
+    allListings = data.listings || [];
+    buildMarkers(allListings);
+    applyFilters();
+
+    const fetchedAt = new Date(data.fetchedAt);
+    const ageMin = Math.round((Date.now() - fetchedAt.getTime()) / 60000);
+    document.getElementById('last-updated').textContent =
+      `Updated ${ageMin < 1 ? 'just now' : ageMin + 'm ago'}`;
+
+    document.getElementById('stale-badge').style.display = data.stale ? 'inline-block' : 'none';
+    setRefreshingUI(data.refreshing);
+  }
+
+  async function loadListings() {
+    document.getElementById('loading').classList.remove('hidden');
+    try {
+      const res = await fetch('/api/listings');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      renderListings(data);
+
+      if (data.refreshing) {
+        pollUntilDone();
+      }
+    } catch (err) {
+      alert('Failed to load listings: ' + err.message);
+    } finally {
+      document.getElementById('loading').classList.add('hidden');
+    }
+  }
+
+  async function pollUntilDone() {
+    while (true) {
+      await new Promise(r => setTimeout(r, 8000));
+      const res = await fetch('/api/status');
+      const status = await res.json();
+      if (!status.refreshing) {
+        const data = await (await fetch('/api/listings')).json();
+        renderListings(data);
+        break;
+      }
+    }
+  }
+
+  async function forceRefresh() {
+    document.getElementById('refresh-btn').disabled = true;
+    setRefreshingUI(true);
+    await fetch('/api/refresh', { method: 'POST' });
+    pollUntilDone();
+  }
+
+  loadListings();
+</script>
+</body>
+</html>
