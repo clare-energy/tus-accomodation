@@ -21,7 +21,9 @@ const GEO_TOLERANCE = 0.01;
 
 const SOURCES = [
   { tag: 84, label: 'Digs 5 Days', color: '#2563eb' },
-  { tag: 61, label: 'Room in Owner Occupied House', color: '#16a34a' },
+  { tag: 61, label: 'Room in Owner Occupied House', color: '#15803d' },
+  { tag: 60, label: 'Digs/B&B 7 Days', color: '#b45309' },
+  { tag: 62, label: 'Room in Owner Occupied House 7 Days', color: '#9333ea' },
 ];
 
 app.use(express.static(path.join(__dirname, 'public')));
