@@ -16,6 +16,11 @@
       border-radius: 2px;
     }
 
+    html, body {
+      height: 100%;
+      overflow: hidden; /* the map pans/zooms itself — the page never needs to scroll */
+    }
+
     body {
       font-family: system-ui, -apple-system, sans-serif;
       display: flex;
@@ -142,18 +147,6 @@
     }
     .sep { width: 1px; height: 28px; background: #cbd5e1; }
 
-    #filter-bar .range-group {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 0.95rem; font-weight: 500; color: #334155;
-      min-height: 44px;
-    }
-    #filter-bar .range-group label { min-height: auto; padding: 0; cursor: default; }
-    #filter-bar input[type="range"] {
-      width: 130px;
-      accent-color: #1d4ed8;
-      cursor: pointer;
-      height: 22px;
-    }
     #contacted-note {
       margin-left: auto;
       font-size: 0.88rem;
@@ -167,8 +160,22 @@
       white-space: nowrap;
     }
 
+    /* Small screens: keep the filter bar to one scrollable row instead of
+       wrapping onto several lines, so header + filter bar stay short and
+       the map is visible without scrolling the page. */
+    @media (max-width: 640px) {
+      #filter-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      #filter-bar label, .sep, #contacted-note { flex-shrink: 0; }
+      #count-label { margin-left: 12px; }
+      #header h1 { font-size: 1.1rem; }
+    }
+
     /* ── Map ── */
-    #map { flex: 1; z-index: 0; }
+    #map { flex: 1; min-height: 0; z-index: 0; }
     #map:focus-visible { outline-offset: -3px; }
 
     .marker-badge {
@@ -317,7 +324,7 @@
 </header>
 
 <fieldset id="filter-bar">
-  <legend>Filter listings by type, price and beds</legend>
+  <legend>Filter listings by type</legend>
   <label>
     <input type="checkbox" id="chk-digs" checked onchange="applyFilters()">
     <span class="dot" style="background:#2563eb" aria-hidden="true"></span>
@@ -339,20 +346,6 @@
     Room in Owner Occupied House 7 Days
   </label>
   <div class="sep" aria-hidden="true"></div>
-  <div class="range-group">
-    <label for="max-weekly">Max weekly:</label>
-    <input type="range" id="max-weekly" min="50" max="400" value="400" step="10"
-      oninput="updateWeeklyLabel(); applyFilters()"
-      aria-valuetext="€400 or more">
-    <span id="weekly-label" aria-hidden="true">€400</span>
-  </div>
-  <div class="range-group">
-    <label for="min-beds">Min beds:</label>
-    <input type="range" id="min-beds" min="1" max="6" value="1" step="1"
-      oninput="updateBedsLabel(); applyFilters()"
-      aria-valuetext="1 or more beds">
-    <span id="beds-label" aria-hidden="true">1+</span>
-  </div>
   <span id="contacted-note">✕ = you've marked as contacted</span>
   <span id="count-label" aria-live="polite">— listings</span>
 </fieldset>
@@ -506,8 +499,6 @@
     const showRoom = document.getElementById('chk-room').checked;
     const showBnb = document.getElementById('chk-bnb').checked;
     const showRoom7 = document.getElementById('chk-room7').checked;
-    const maxWeekly = parseInt(document.getElementById('max-weekly').value, 10);
-    const minBeds = parseInt(document.getElementById('min-beds').value, 10);
 
     clusterGroup.clearLayers();
     let visible = 0;
@@ -517,10 +508,8 @@
                      (l.type === 'Room in Owner Occupied House' && showRoom) ||
                      (l.type === 'Digs/B&B 7 Days' && showBnb) ||
                      (l.type === 'Room in Owner Occupied House 7 Days' && showRoom7);
-      const priceOk = l.weekly == null || l.weekly <= maxWeekly;
-      const bedsOk  = l.beds == null || l.beds >= minBeds;
 
-      if (typeOk && priceOk && bedsOk) {
+      if (typeOk) {
         clusterGroup.addLayer(marker);
         visible++;
       }
@@ -530,21 +519,6 @@
     const noCoords = allListings.filter(l => l.lat == null).length;
     document.getElementById('count-label').textContent =
       `${visible} shown · ${total - noCoords} mapped · ${noCoords} without coords`;
-  }
-
-  function updateWeeklyLabel() {
-    const el = document.getElementById('max-weekly');
-    const v = el.value;
-    const text = v >= 400 ? '€400+' : `€${v}`;
-    document.getElementById('weekly-label').textContent = text;
-    el.setAttribute('aria-valuetext', v >= 400 ? '€400 or more' : `€${v} maximum weekly rent`);
-  }
-
-  function updateBedsLabel() {
-    const el = document.getElementById('min-beds');
-    const v = el.value;
-    document.getElementById('beds-label').textContent = `${v}+`;
-    el.setAttribute('aria-valuetext', `${v} or more beds`);
   }
 
   function setRefreshingUI(refreshing) {
